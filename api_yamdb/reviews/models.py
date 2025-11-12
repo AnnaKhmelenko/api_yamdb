@@ -1,45 +1,71 @@
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.core.validators import MinValueValidator, MaxValueValidator
 
 
-# Основные модели
 class Review(models.Model):
-    # ВРЕМЕННО убираем связи - будут добавлены позже
-    # title = models.ForeignKey('titles.Title', ...)
-    # author = models.ForeignKey('users.CustomUser', ...)
-
-    text = models.TextField(verbose_name='Текст отзыва')
+    title = models.ForeignKey(
+        'titles.Title',
+        on_delete=models.CASCADE,
+        related_name='reviews',
+        verbose_name='Произведение'
+    )
+    text = models.TextField(
+        verbose_name='Текст отзыва'
+    )
+    author = models.ForeignKey(
+        'users.CustomUser',
+        on_delete=models.CASCADE,
+        related_name='reviews', 
+        verbose_name='Автор'
+    )
     score = models.IntegerField(
         verbose_name='Оценка',
-        validators=[MinValueValidator(1), MaxValueValidator(10)]
+        validators=[
+            MinValueValidator(1),
+            MaxValueValidator(10)
+        ]
     )
     pub_date = models.DateTimeField(
         auto_now_add=True,
-        verbose_name='Дата публикации'
+        verbose_name='Дата публикации',
+        db_index=True
     )
 
     class Meta:
         verbose_name = 'Отзыв'
         verbose_name_plural = 'Отзывы'
         ordering = ['-pub_date']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['title', 'author'],
+                name='unique_review'
+            )
+        ]
 
     def __str__(self):
-        return f'Отзыв {self.id}'
+        return f'{self.text[:50]}...' if len(self.text) > 50 else self.text
 
 
 class Comment(models.Model):
     review = models.ForeignKey(
         Review,
         on_delete=models.CASCADE,
-        related_name='comments', 
+        related_name='comments',
         verbose_name='Отзыв'
     )
-    # author = models.ForeignKey('users.CustomUser', ...)  # временно убираем
-
-    text = models.TextField(verbose_name='Текст комментария')
+    text = models.TextField(
+        verbose_name='Текст комментария'
+    )
+    author = models.ForeignKey(
+        'users.CustomUser',
+        on_delete=models.CASCADE,
+        related_name='comments',
+        verbose_name='Автор'
+    )
     pub_date = models.DateTimeField(
-        auto_now_add=True, 
-        verbose_name='Дата публикации'
+        auto_now_add=True,
+        verbose_name='Дата публикации',
+        db_index=True
     )
 
     class Meta:
@@ -48,4 +74,4 @@ class Comment(models.Model):
         ordering = ['-pub_date']
 
     def __str__(self):
-        return f'Комментарий {self.id}'
+        return f'{self.text[:50]}...' if len(self.text) > 50 else self.text
