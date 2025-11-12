@@ -1,18 +1,39 @@
-from rest_framework.permissions import BasePermission, IsAuthenticated
+from rest_framework import permissions
 
-class IsAdminOrReadOnly(BasePermission):
+
+class IsAuthorOrReadOnly(permissions.BasePermission):
+    """
+    Разрешение на редактирование только для автора.
+    Остальные могут только читать.
+    """
+    def has_object_permission(self, request, view, obj):
+        # Чтение разрешено для всех
+        if request.method in permissions.SAFE_METHODS:
+            return True
+
+        # Редактирование только для автора
+        return obj.author == request.user
+
+
+class IsAdminOrReadOnly(permissions.BasePermission):
+    """
+    Разрешение на редактирование только для админов.
+    Остальные могут только читать.
+    """
     def has_permission(self, request, view):
         return (
-            request.method in ('GET', 'HEAD', 'OPTIONS') or
-            request.user and request.user.is_superuser
+            request.method in permissions.SAFE_METHODS
+            or request.user.is_staff
         )
 
-class IsModeratorOrOwner(BasePermission):
+
+class IsModeratorOrAuthor(permissions.BasePermission):
+    """
+    Разрешение для модераторов и авторов.
+    """
     def has_object_permission(self, request, view, obj):
-        # владелец или модератор или администратор
         return (
-            request.method in ('GET', 'HEAD') or
-            request.user.is_superuser or
-            request.user.role == 'moderator' or
-            obj.author == request.user
+            request.method in permissions.SAFE_METHODS
+            or request.user.is_staff
+            or obj.author == request.user
         )

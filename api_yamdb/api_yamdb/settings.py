@@ -24,6 +24,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework_simplejwt',
+    'django_filters',
     'djoser',
     'api',
     'reviews',
@@ -107,7 +108,7 @@ SIMPLE_JWT = {
 }
 
 # Кастомный пользователь
-AUTH_USER_MODEL = 'api.models.CustomUser'
+AUTH_USER_MODEL = 'reviews.CustomUser'
 
 # Internationalization
 

@@ -3,18 +3,24 @@ import uuid
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
+USER = 'user'
+MODERATOR = 'moderator'
+ADMIN = 'admin'
+
 
 class CustomUser(AbstractUser):
-    USER = 'user'
-    MODERATOR = 'moderator'
-    ADMIN = 'admin'
 
+    """Модификация пользователей."""
     ROLE_CHOICES = [
         (USER, 'Пользователь'),
         (MODERATOR, 'Модератор'),
         (ADMIN, 'Администратор'),
     ]
 
+    username = models.CharField(unique=True)
+    first_name = models.CharField(blank=True)
+    last_name = models.CharField(blank=True)
+    bio = models.TextField(blank=True, null=True)
     email = models.EmailField('Email', unique=True)
     role = models.CharField(
         max_length=10,
