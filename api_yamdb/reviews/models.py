@@ -2,24 +2,23 @@ import uuid
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models import Avg
 
-# Модели первого разработчика (аутентификация)
 USER = 'user'
 MODERATOR = 'moderator'
 ADMIN = 'admin'
 
 
 class CustomUser(AbstractUser):
-    """Модификация пользователей."""
     ROLE_CHOICES = [
         (USER, 'Пользователь'),
         (MODERATOR, 'Модератор'),
         (ADMIN, 'Администратор'),
     ]
 
-    username = models.CharField(unique=True)
-    first_name = models.CharField(blank=True)
-    last_name = models.CharField(blank=True)
+    username = models.CharField(max_length=150, unique=True)
+    first_name = models.CharField(max_length=150, blank=True)
+    last_name = models.CharField(max_length=150, blank=True)
     bio = models.TextField(blank=True, null=True)
     email = models.EmailField('Email', unique=True)
     role = models.CharField(
@@ -45,9 +44,7 @@ class CustomUser(AbstractUser):
         return self.username
 
 
-# Модели второго разработчика (категории, жанры, произведения)
 class Category(models.Model):
-    """Модель для категорий произведений"""
     name = models.CharField(
         max_length=50,
         verbose_name='Название категории',
@@ -70,7 +67,6 @@ class Category(models.Model):
 
 
 class Genre(models.Model):
-    """Модель для жанров произведений"""
     name = models.CharField(
         max_length=50,
         verbose_name='Название жанра',
@@ -93,7 +89,6 @@ class Genre(models.Model):
 
 
 class Title(models.Model):
-    """Модель для произведений"""
     name = models.CharField(
         max_length=128,
         verbose_name='Название произведения',
@@ -107,6 +102,12 @@ class Title(models.Model):
         verbose_name='Год выпуска',
         help_text='Введите год выпуска произведения'
     )
+    description = models.TextField(
+        blank=True,
+        null=True,
+        verbose_name='Описание произведения',
+        help_text='Введите описание произведения'
+    )
     category = models.ForeignKey(
         Category,
         on_delete=models.SET_NULL,
@@ -114,6 +115,13 @@ class Title(models.Model):
         related_name='titles',
         verbose_name='Категория',
         help_text='Выберите категорию произведения'
+    )
+    genre = models.ManyToManyField(
+        Genre,
+        through='GenreTitle',
+        related_name='titles',
+        verbose_name='Жанр',
+        help_text='Выберите жанр произведения'
     )
 
     class Meta:
@@ -124,9 +132,17 @@ class Title(models.Model):
     def __str__(self):
         return f'{self.name} ({self.year})'
 
+    @property
+    def rating(self):
+        """Вычисляет средний рейтинг на основе отзывов"""
+        reviews = self.reviews.all()
+        if not reviews:
+            return None
+        avg_rating = reviews.aggregate(Avg('score'))['score__avg']
+        return int(avg_rating) if avg_rating else None
+
 
 class GenreTitle(models.Model):
-    """Промежуточная модель для связи многие-ко-многим"""
     title = models.ForeignKey(
         Title,
         on_delete=models.CASCADE,
@@ -152,7 +168,6 @@ class GenreTitle(models.Model):
         return f'{self.title} - {self.genre}'
 
 
-# Модели третьего разработчика (отзывы и комментарии)
 class Review(models.Model):
     title = models.ForeignKey(
         Title,
@@ -166,7 +181,7 @@ class Review(models.Model):
     author = models.ForeignKey(
         CustomUser,
         on_delete=models.CASCADE,
-        related_name='reviews', 
+        related_name='reviews',
         verbose_name='Автор'
     )
     score = models.IntegerField(
