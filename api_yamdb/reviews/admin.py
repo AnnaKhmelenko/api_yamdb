@@ -1,6 +1,5 @@
 from django.contrib import admin
-
-from .models import Category, Genre, Title, GenreTitle
+from .models import Category, Genre, Title, GenreTitle, Review, Comment
 
 
 @admin.register(Category)
@@ -28,7 +27,6 @@ class TitleAdmin(admin.ModelAdmin):
     list_display_links = ('name',)
     list_filter = ('category', 'year')
     search_fields = ('name', 'category__name')
-    # Убрано filter_horizontal так как нет прямого поля genre
 
 
 @admin.register(GenreTitle)
@@ -38,3 +36,17 @@ class GenreTitleAdmin(admin.ModelAdmin):
     list_display_links = ('title',)
     list_filter = ('genre',)
     search_fields = ('title__name', 'genre__name')
+
+
+@admin.register(Review)
+class ReviewAdmin(admin.ModelAdmin):
+    list_display = ('id', 'text', 'score', 'pub_date')
+    list_filter = ('pub_date', 'score')
+    search_fields = ('text',)
+
+
+@admin.register(Comment)
+class CommentAdmin(admin.ModelAdmin):
+    list_display = ('id', 'text', 'pub_date')
+    list_filter = ('pub_date',)
+    search_fields = ('text',)
