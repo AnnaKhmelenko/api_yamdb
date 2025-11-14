@@ -1,17 +1,20 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
-from reviews.models import CustomUser
-from .serializers import SignUpSerializer, TokenSerializer, UserSerializer, UserCreateSerializer
-from .permissions import IsAdminOrReadOnly, IsModeratorOrAuthor, IsAuthorOrReadOnly
-
-from rest_framework import viewsets, permissions
+from rest_framework import status, viewsets, permissions, mixins
+from rest_framework.filters import SearchFilter
+from django_filters.rest_framework import DjangoFilterBackend
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import AccessToken
+
+from reviews.models import CustomUser, Category, Genre, Title
+from .serializers import SignUpSerializer, TokenSerializer, UserSerializer, UserCreateSerializer, CategorySerializer, GenreSerializer, TitleReadSerializer, TitleWriteSerializer
+from .permissions import IsAdminOrReadOnly, IsModeratorOrAuthor, IsAuthorOrReadOnly
+from .filters import TitleFilter
 
 User = get_user_model()
 
 
+# View-классы первого разработчика (аутентификация)
 class SignUpView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -58,3 +61,44 @@ class UsersViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = (permissions.IsAuthenticated, )
+
+
+# View-классы второго разработчика (категории, жанры, произведения)
+class CategoryViewSet(
+    mixins.CreateModelMixin,
+    mixins.DestroyModelMixin,
+    mixins.ListModelMixin,
+    viewsets.GenericViewSet
+):
+    queryset = Category.objects.all()
+    serializer_class = CategorySerializer
+    filter_backends = (SearchFilter,)
+    search_fields = ('name',)
+    lookup_field = 'slug'
+
+
+class GenreViewSet(
+    mixins.CreateModelMixin,
+    mixins.DestroyModelMixin,
+    mixins.ListModelMixin,
+    viewsets.GenericViewSet
+):
+    queryset = Genre.objects.all()
+    serializer_class = GenreSerializer
+    filter_backends = (SearchFilter,)
+    search_fields = ('name',)
+    lookup_field = 'slug'
+
+
+class TitleViewSet(viewsets.ModelViewSet):
+    queryset = Title.objects.all()
+    filter_backends = (DjangoFilterBackend,)
+    filterset_class = TitleFilter
+
+    def get_serializer_class(self):
+        if self.action in ('list', 'retrieve'):
+            return TitleReadSerializer
+        return TitleWriteSerializer
+
+    def get_queryset(self):
+        return Title.objects.prefetch_related('genre_links__genre')

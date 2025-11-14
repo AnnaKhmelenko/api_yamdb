@@ -1,7 +1,7 @@
 import uuid
 from django.contrib.auth.models import AbstractUser
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.core.validators import MinValueValidator, MaxValueValidator
 
 # Модели первого разработчика (аутентификация)
 USER = 'user'
@@ -123,6 +123,7 @@ class Title(models.Model):
 
     def __str__(self):
         return f'{self.name} ({self.year})'
+
 
 class GenreTitle(models.Model):
     """Промежуточная модель для связи многие-ко-многим"""
