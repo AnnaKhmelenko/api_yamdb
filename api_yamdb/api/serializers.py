@@ -1,80 +1,84 @@
 import re
-import uuid
-from rest_framework import serializers
-from django.core.mail import send_mail
-from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.shortcuts import get_object_or_404
+from rest_framework import serializers
+from rest_framework_simplejwt.tokens import AccessToken
 
 from reviews.models import CustomUser
+from api_yamdb.settings import USERPATTERN
 
-User = get_user_model()
-
-USERPATTERN = r'^[\w.@+-]+\Z'
-
-def send_confirmation_email(user):
-    confirmation_code = str(uuid.uuid4())  # Генерация уникального кода
-    user.confirmation_code = confirmation_code
-    user.save()
-    subject = 'Код подтверждения'
-    message = f'Ваш код подтверждения: {confirmation_code}'
-    recipient_list = [user.email]
-    send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, recipient_list)
-
-class UserCreateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = CustomUser
-        fields = ('username', 'email')
-
-class SignUpSerializer(serializers.Serializer):
-    email = serializers.EmailField(max_length=254)
-    username = serializers.CharField(max_length=150)
-
-    def validate_username(self, value):
-        if not re.match(USERPATTERN, value):
-            raise serializers.ValidationError('Недопустимые символы в username.')
-        return value
-
-    def validate(self, data):
-        if User.objects.filter(username=data['username']).exists():
-            raise serializers.ValidationError("Пользователь с таким username уже существует.")
-        return data
-
-    def create(self, validated_data):
-        user = User.objects.create_user(
-            username=validated_data['username'],
-            email=validated_data['email'],
-        )
-        send_confirmation_email(user)  # Отправка письма с кодом
-        return user
-
-
-class TokenSerializer(serializers.Serializer):
-    username = serializers.CharField()
-    confirmation_code = serializers.CharField()
+User = get_user_model()  # в настройках проекта определена модель CustomUser.
 
 
 class UserSerializer(serializers.ModelSerializer):
-    first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
-    last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    """Сериализатор модели CustomUser."""
+
     def validate_username(self, value):
+        """Функция проверки имени пользователя."""
+        # проверка длины - 150 символов.
         if len(value) > 150:
-            raise serializers.ValidationError('Длина username не должна превышать 150 символов.')
+            raise serializers.ValidationError(
+                'Длина username не должна превышать 150 символов.')
+        # проверка формата - запрещенные символы.
         if not re.match(USERPATTERN, value):
-            raise serializers.ValidationError('У имени пользователя неправильный формат.')
+            raise serializers.ValidationError(
+                'У имени пользователя неправильный формат.')
+        # имя пользователя не должно начинаться с me.
+        if value == 'me':
+            raise serializers.ValidationError('Недопустимое имя пользователя.')
         return value
 
-    def validate_email(self, value):
-        if len(value) > 254:
-            raise serializers.ValidationError('Длина email не должна превышать 254 символов.')
-        return value
-    
     class Meta:
-        model = CustomUser
         fields = (
             'username',
             'email',
             'first_name',
             'last_name',
+            'bio',
             'role',
         )
-        read_only_fields = ('role',)
+        model = CustomUser
+
+
+class UsersMeSerializer(UserSerializer):
+    """Сериализатор для эндпоинта users/me/."""
+
+    role = serializers.CharField(read_only=True)
+
+
+class GetTokenSerializer(serializers.Serializer):
+    """Сериализатор для получения токена."""
+
+    username = serializers.CharField(max_length=150)
+    confirmation_code = serializers.CharField(max_length=20)
+
+    def validate(self, data):
+        """Проверка совпадения кода подтверждения."""
+        user = get_object_or_404(User, username=data.get('username'))
+        if user.confirmation_code != data.get('confirmation_code'):
+            raise serializers.ValidationError(
+                'Неправильный код подтверждения!')
+        return {'access': str(AccessToken.for_user(user))}
+
+
+class SignupSerializer(serializers.ModelSerializer):
+    """Сериализатор для регистрации пользователей."""
+
+    def validate_username(self, value):
+        """Функция проверки имени пользователя."""
+        # проверка длины - 150 символов.
+        if len(value) > 150:
+            raise serializers.ValidationError(
+                'Длина username не должна превышать 150 символов.')
+        # проверка формата - запрещенные символы.
+        if not re.match(USERPATTERN, value):
+            raise serializers.ValidationError(
+                'У имени пользователя неправильный формат.')
+        # имя пользователя не должно начинаться с me.
+        if value == 'me':
+            raise serializers.ValidationError('Недопустимое имя пользователя.')
+        return value
+
+    class Meta:
+        fields = ('username', 'email')
+        model = CustomUser

@@ -1,60 +1,73 @@
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from reviews.models import CustomUser
-from .serializers import SignUpSerializer, TokenSerializer, UserSerializer, UserCreateSerializer
-from .permissions import IsAdminOrReadOnly, IsModeratorOrAuthor, IsAuthorOrReadOnly
-
-from rest_framework import viewsets, permissions
 from django.contrib.auth import get_user_model
-from rest_framework_simplejwt.tokens import AccessToken
+from django.shortcuts import get_object_or_404
+from rest_framework import filters, status, viewsets
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework.views import APIView
 
-User = get_user_model()
+from .confirmations import send_confirmation_code
+from .permissions import IsAdminUser
+from .serializers import (
+    GetTokenSerializer,
+    SignupSerializer,
+    UserSerializer,
+    UsersMeSerializer
+)
+
+User = get_user_model()  # В настройках определена модель CustomUser
+
+
+class UserViewSet(viewsets.ModelViewSet):
+    """Вью для модели CustomUser."""
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+    lookup_field = 'username'
+    http_method_names = ('get', 'post', 'patch', 'delete')
+    filter_backends = (filters.SearchFilter,)
+    search_fields = ('username',)
+    permission_classes = (IsAuthenticated, IsAdminUser)
+
+
+class UsersMeView(APIView):
+    """Вью для эндпоинта users/me/."""
+
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        """Переопределим метод GET."""
+        me = get_object_or_404(User, username=request.user.username)
+        serializer = UserSerializer(me)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        """Переопределим метод PATCH."""
+        me = get_object_or_404(User, username=request.user.username)
+        serializer = UsersMeSerializer(me, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class GetTokenView(TokenObtainPairView):
+    """Вью для получения токена"""
+
+    serializer_class = GetTokenSerializer
 
 
 class SignUpView(APIView):
-    permission_classes = [permissions.AllowAny]
+    """Вью для регистрации пользователей."""
+
+    permission_classes = (AllowAny,)
 
     def post(self, request):
-        serializer = SignUpSerializer(data=request.data)
-        if serializer.is_valid():
-            user = serializer.save()
-            response_serializer = UserCreateSerializer(user)
-            return Response(response_serializer.data, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class GetTokenView(APIView):
-    def post(self, request):
-        serializer = TokenSerializer(data=request.data)
+        """Переопределим метод POST."""
+        serializer = SignupSerializer(data=request.data)
+        if User.objects.filter(username=request.data.get('username'),
+                               email=request.data.get('email')).exists():
+            send_confirmation_code(request)
+            return Response(request.data, status=status.HTTP_200_OK)
         serializer.is_valid(raise_exception=True)
-        username = serializer.validated_data['username']
-        code = serializer.validated_data['confirmation_code']
-        try:
-            user = User.objects.get(username=username)
-        except User.DoesNotExist:
-            return Response({'error': 'Пользователь не найден'}, status=400)
-        if user.confirmation_code != code:
-            return Response({'error': 'Неверный код подтверждения'}, status=400)
-        token = str(AccessToken.for_user(user))
-        return Response({'token': token})
-
-
-class UserMeView(viewsets.ModelViewSet):
-    serializer_class = UserSerializer
-    permission_classes = (permissions.IsAuthenticated, IsAuthorOrReadOnly)
-
-    def get_queryset(self):
-        return CustomUser.objects.filter(id=self.request.user.id)
-
-    def get_object(self):
-        return self.request.user
-
-    def perform_update(self, serializer):
         serializer.save()
-
-
-class UsersViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.all()
-    serializer_class = UserSerializer
-    permission_classes = (permissions.IsAuthenticated, )
+        send_confirmation_code(request)
+        return Response(serializer.data, status=status.HTTP_200_OK)
