@@ -1,56 +1,102 @@
+import re
 import uuid
 from datetime import datetime
 
 from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
-from django.core.validators import MaxValueValidator, MinValueValidator
+from django.core.validators import (MaxValueValidator, MinValueValidator,
+                                    RegexValidator)
 from django.db import models
 
-USER = 'user'
-MODERATOR = 'moderator'
-ADMIN = 'admin'
+from .constants import (
+    ADMIN, MAX_LENGTH_CATEGORY_NAME,
+    MAX_LENGTH_CATEGORY_SLUG, MAX_LENGTH_COMMENT_TEXT,
+    MAX_LENGTH_CONFIRMATION_CODE, MAX_LENGTH_EMAIL,
+    MAX_LENGTH_REVIEW_TEXT, MAX_LENGTH_TITLE_NAME,
+    MAX_LENGTH_USERNAME, MAX_SCORE, MIN_SCORE, MODERATOR,
+    ROLE_CHOICES, USER)
 
 
-class CustomUser(AbstractUser):
+def validate_username(value):
+    """Валидация имени пользователя."""
+    if value.lower() == 'me':
+        raise ValidationError('Имя пользователя "me" не разрешено.')
+
+    invalid_chars = re.sub(r'[\w.@+-]', '', value)
+    if invalid_chars:
+        raise ValidationError(
+            f'Недопустимые символы в имени пользователя: {invalid_chars}'
+        )
+    return value
+
+
+def validate_year(value):
+    """Валидация года выпуска."""
+    current_year = datetime.now().year
+    if value > current_year:
+        raise ValidationError('Год выпуска не может быть в будущем.')
+    return value
+
+
+class BaseSlugModel(models.Model):
+    """Абстрактная базовая модель для категорий и жанров."""
+
+    name = models.CharField(
+        max_length=MAX_LENGTH_CATEGORY_NAME,
+        unique=True,
+        verbose_name='Название'
+    )
+    slug = models.SlugField(
+        max_length=MAX_LENGTH_CATEGORY_SLUG,
+        unique=True,
+        verbose_name='Slug'
+    )
+
+    class Meta:
+        abstract = True
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class User(AbstractUser):
     """
-    Кастомная модель пользователя с расширенными полями.
-
-    Наследует от AbstractUser и добавляет поля для ролей,
-    биографии и кода подтверждения.
+    Модель пользователя с расширенными полями.
     """
-    ROLE_CHOICES = [
-        (USER, 'Пользователь'),
-        (MODERATOR, 'Модератор'),
-        (ADMIN, 'Администратор'),
-    ]
 
     username = models.CharField(
-        max_length=150,
+        max_length=MAX_LENGTH_USERNAME,
         unique=True,
-        verbose_name='Имя пользователя'
+        verbose_name='Имя пользователя',
+        validators=[
+            RegexValidator(
+                regex=r'^[\w.@+-]+\Z',
+                message='Недопустимые символы в имени пользователя.'
+            ),
+            validate_username
+        ]
     )
     bio = models.TextField(
         blank=True,
-        null=True,
         verbose_name='Биография',
         help_text='Расскажите о себе'
     )
     email = models.EmailField(
         'Email',
         unique=True,
-        db_index=True,
+        max_length=MAX_LENGTH_EMAIL,
         help_text='Укажите электронную почту'
     )
     role = models.CharField(
-        max_length=10,
+        max_length=max(len(role) for role, _ in ROLE_CHOICES),
         choices=ROLE_CHOICES,
         default=USER,
         verbose_name='Роль'
     )
     confirmation_code = models.CharField(
-        max_length=32,
+        max_length=MAX_LENGTH_CONFIRMATION_CODE,
         blank=True,
-        null=True,
         verbose_name='Код подтверждения',
         help_text='Код подтверждения для регистрации'
     )
@@ -64,92 +110,49 @@ class CustomUser(AbstractUser):
     @property
     def is_admin(self):
         """Проверяет, является ли пользователь администратором."""
-        return self.role == ADMIN or self.is_staff
+        return self.role == ADMIN or self.is_staff or self.is_superuser
 
     @property
     def is_moderator(self):
         """Проверяет, является ли пользователь модератором."""
         return self.role == MODERATOR
 
-    @property
-    def is_user(self):
-        """Проверяет, является ли пользователь обычным пользователем."""
-        return self.role == USER
-
     def __str__(self):
         """Возвращает строковое представление пользователя."""
         return self.username
 
 
-class Category(models.Model):
+class Category(BaseSlugModel):
     """Модель категории произведений."""
 
-    name = models.CharField(
-        max_length=50,
-        verbose_name='Название категории',
-        help_text='Введите название категории'
-    )
-    slug = models.SlugField(
-        max_length=50,
-        unique=True,
-        verbose_name='Slug категории',
-        help_text='Уникальный идентификатор категории для URL'
-    )
-
-    class Meta:
+    class Meta(BaseSlugModel.Meta):
         verbose_name = 'Категория'
         verbose_name_plural = 'Категории'
-        ordering = ['name']
-
-    def __str__(self):
-        """Возвращает строковое представление категории."""
-        return self.name
 
 
-class Genre(models.Model):
+class Genre(BaseSlugModel):
     """Модель жанра произведений."""
 
-    name = models.CharField(
-        max_length=50,
-        verbose_name='Название жанра',
-        help_text='Введите название жанра'
-    )
-    slug = models.SlugField(
-        max_length=50,
-        unique=True,
-        verbose_name='Slug жанра',
-        help_text='Уникальный идентификатор жанра для URL'
-    )
-
-    class Meta:
+    class Meta(BaseSlugModel.Meta):
         verbose_name = 'Жанр'
         verbose_name_plural = 'Жанры'
-        ordering = ['name']
-
-    def __str__(self):
-        """Возвращает строковое представление жанра."""
-        return self.name
 
 
 class Title(models.Model):
     """Модель произведения (фильмы, книги, музыка и т.д.)."""
 
     name = models.CharField(
-        max_length=128,
+        max_length=MAX_LENGTH_TITLE_NAME,
         verbose_name='Название произведения',
         help_text='Введите название произведения'
     )
-    year = models.PositiveSmallIntegerField(
-        validators=[
-            MinValueValidator(1000),
-            MaxValueValidator(2050)
-        ],
+    year = models.SmallIntegerField(
+        validators=[validate_year],
         verbose_name='Год выпуска',
         help_text='Введите год выпуска произведения'
     )
     description = models.TextField(
         blank=True,
-        null=True,
         verbose_name='Описание произведения',
         help_text='Введите описание произведения'
     )
@@ -163,7 +166,6 @@ class Title(models.Model):
     )
     genre = models.ManyToManyField(
         Genre,
-        through='GenreTitle',
         related_name='titles',
         verbose_name='Жанр',
         help_text='Выберите жанр произведения'
@@ -178,70 +180,9 @@ class Title(models.Model):
             models.Index(fields=['category']),
         ]
 
-    def clean(self):
-        """Проверяет корректность года выпуска."""
-        if self.year > datetime.now().year:
-            raise ValidationError(
-                {'year': 'Год выпуска не может быть в будущем'}
-            )
-
-    def save(self, *args, **kwargs):
-        """Сохраняет произведение с предварительной валидацией."""
-        self.clean()
-        super().save(*args, **kwargs)
-
-    @property
-    def rating(self):
-        """Вычисляет средний рейтинг произведения на основе отзывов."""
-        from django.db.models import Avg
-
-        # Используем правильный related_name 'reviews' из модели Review
-        avg_rating = self.reviews.aggregate(Avg('score'))['score__avg']
-
-        # Если есть рейтинг - округляем и возвращаем, иначе None
-        return round(avg_rating) if avg_rating is not None else None
-
     def __str__(self):
         """Возвращает строковое представление произведения."""
         return f'{self.name} ({self.year})'
-
-
-class GenreTitle(models.Model):
-    """
-    Промежуточная модель для связи Many-to-Many между Title и Genre.
-
-    Позволяет добавлять дополнительные поля к связи в будущем.
-    """
-
-    title = models.ForeignKey(
-        Title,
-        on_delete=models.CASCADE,
-        related_name='genre_links',
-        verbose_name='Произведение'
-    )
-    genre = models.ForeignKey(
-        Genre,
-        on_delete=models.CASCADE,
-        related_name='title_links',
-        verbose_name='Жанр'
-    )
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=['title', 'genre'],
-                name='unique_title_genre'
-            )
-        ]
-        verbose_name = 'Связь жанра и произведения'
-        verbose_name_plural = 'Связи жанров и произведений'
-        indexes = [
-            models.Index(fields=['title', 'genre']),
-        ]
-
-    def __str__(self):
-        """Возвращает строковое представление связи."""
-        return f'{self.title} - {self.genre}'
 
 
 class Review(models.Model):
@@ -253,9 +194,12 @@ class Review(models.Model):
         related_name='reviews',
         verbose_name='Произведение'
     )
-    text = models.TextField(verbose_name='Текст отзыва')
+    text = models.TextField(
+        max_length=MAX_LENGTH_REVIEW_TEXT,
+        verbose_name='Текст отзыва'
+    )
     author = models.ForeignKey(
-        CustomUser,
+        User,
         on_delete=models.CASCADE,
         related_name='reviews',
         verbose_name='Автор'
@@ -263,8 +207,8 @@ class Review(models.Model):
     score = models.IntegerField(
         verbose_name='Оценка',
         validators=[
-            MinValueValidator(1),
-            MaxValueValidator(10)
+            MinValueValidator(MIN_SCORE),
+            MaxValueValidator(MAX_SCORE)
         ]
     )
     pub_date = models.DateTimeField(
@@ -302,9 +246,12 @@ class Comment(models.Model):
         related_name='comments',
         verbose_name='Отзыв'
     )
-    text = models.TextField(verbose_name='Текст комментария')
+    text = models.TextField(
+        max_length=MAX_LENGTH_COMMENT_TEXT,
+        verbose_name='Текст комментария'
+    )
     author = models.ForeignKey(
-        CustomUser,
+        User,
         on_delete=models.CASCADE,
         related_name='comments',
         verbose_name='Автор'

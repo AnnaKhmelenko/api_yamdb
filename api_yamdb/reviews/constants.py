@@ -1,0 +1,33 @@
+# reviews/constants.py
+
+# Константы для моделей
+MAX_LENGTH_USERNAME = 150
+MAX_LENGTH_EMAIL = 254
+MAX_LENGTH_ROLE = 20
+MAX_LENGTH_CONFIRMATION_CODE = 32
+
+MAX_LENGTH_CATEGORY_NAME = 256
+MAX_LENGTH_CATEGORY_SLUG = 50
+
+MAX_LENGTH_GENRE_NAME = 256
+MAX_LENGTH_GENRE_SLUG = 50
+
+MAX_LENGTH_TITLE_NAME = 256
+
+MAX_LENGTH_REVIEW_TEXT = 10000
+MAX_LENGTH_COMMENT_TEXT = 10000
+
+# Роли пользователей
+USER = 'user'
+MODERATOR = 'moderator'
+ADMIN = 'admin'
+
+ROLE_CHOICES = [
+    (USER, 'Пользователь'),
+    (MODERATOR, 'Модератор'),
+    (ADMIN, 'Администратор'),
+]
+
+# Валидация оценок
+MIN_SCORE = 1
+MAX_SCORE = 10

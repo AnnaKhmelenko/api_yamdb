@@ -1,9 +1,9 @@
-import django_filters
+from django_filters import rest_framework
 
 from reviews.models import Title
 
 
-class TitleFilter(django_filters.FilterSet):
+class TitleFilter(rest_framework.FilterSet):
     """
     FilterSet для произведений (Title).
 
@@ -14,25 +14,20 @@ class TitleFilter(django_filters.FilterSet):
     - year (точное совпадение)
     """
 
-    name = django_filters.CharFilter(
+    name = rest_framework.CharFilter(
         field_name='name',
         lookup_expr='icontains',
         help_text='Фильтр по названию произведения (регистронезависимый)'
     )
 
-    category = django_filters.CharFilter(
+    category = rest_framework.CharFilter(
         field_name='category__slug',
         help_text='Фильтр по slug категории'
     )
 
-    genre = django_filters.CharFilter(
-        field_name='genre__slug',  # ← ОПТИМИЗАЦИЯ: используем прямое M2M поле
+    genre = rest_framework.CharFilter(
+        field_name='genre__slug',
         help_text='Фильтр по slug жанра'
-    )
-
-    year = django_filters.NumberFilter(
-        field_name='year',
-        help_text='Фильтр по году выпуска'
     )
 
     class Meta:

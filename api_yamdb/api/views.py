@@ -1,6 +1,5 @@
-# api/views.py
-
 from django.contrib.auth import get_user_model
+from django.db.models import Avg
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.decorators import action
@@ -12,29 +11,19 @@ from rest_framework_simplejwt.tokens import AccessToken
 
 from reviews.models import Category, Genre, Title
 from .filters import TitleFilter
-from .permissions import IsAdminOrReadOnly
+from .permissions import IsAdminOnly, IsAdminOrReadOnly
 from .serializers import (
     CategorySerializer,
     GenreSerializer,
     SignUpSerializer,
+    SignUpResponseSerializer,
     TitleReadSerializer,
     TitleWriteSerializer,
     TokenSerializer,
-    UserCreateSerializer,
     UserSerializer,
 )
 
 User = get_user_model()
-
-
-class IsAdmin(permissions.BasePermission):
-    """Разрешение только для администраторов и суперпользователей."""
-
-    def has_permission(self, request, view):
-        return (
-            request.user.is_authenticated
-            and (request.user.role == 'admin' or request.user.is_superuser)
-        )
 
 
 class SignUpView(APIView):
@@ -45,16 +34,12 @@ class SignUpView(APIView):
     def post(self, request):
         """Обработка POST-запроса для регистрации."""
         serializer = SignUpSerializer(data=request.data)
-        if serializer.is_valid():
-            user = serializer.save()
-            response_serializer = UserCreateSerializer(user)
-            return Response(
-                response_serializer.data,
-                status=status.HTTP_200_OK
-            )
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        response_serializer = SignUpResponseSerializer(user)
         return Response(
-            serializer.errors,
-            status=status.HTTP_400_BAD_REQUEST
+            response_serializer.data,
+            status=status.HTTP_200_OK
         )
 
 
@@ -67,6 +52,12 @@ class GetTokenView(APIView):
         """Обработка POST-запроса для получения токена."""
         serializer = TokenSerializer(data=request.data)
         if not serializer.is_valid():
+            if 'username' in serializer.errors and 'user_not_found' in str(
+                    serializer.errors.get('username', [])):
+                return Response(
+                    {'error': 'Пользователь не найден'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
             return Response(
                 serializer.errors,
                 status=status.HTTP_400_BAD_REQUEST
@@ -83,7 +74,6 @@ class GetTokenView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # Безопасная проверка confirmation_code
         user_confirmation_code = getattr(user, 'confirmation_code', None)
         if user_confirmation_code != code:
             return Response(
@@ -100,20 +90,12 @@ class UsersViewSet(viewsets.ModelViewSet):
 
     queryset = User.objects.all().order_by('id')
     serializer_class = UserSerializer
-    permission_classes = (IsAdmin,)
+    permission_classes = (IsAdminOnly,)
     pagination_class = PageNumberPagination
     lookup_field = 'username'
     filter_backends = (SearchFilter,)
     search_fields = ('username',)
-
-    def update(self, request, *args, **kwargs):
-        """Запрещает PUT-запросы, разрешает только PATCH."""
-        if request.method == 'PUT':
-            return Response(
-                {'detail': 'Method "PUT" not allowed.'},
-                status=status.HTTP_405_METHOD_NOT_ALLOWED
-            )
-        return super().update(request, *args, **kwargs)
+    http_method_names = ['get', 'post', 'patch', 'delete']
 
     @action(
         detail=False,
@@ -126,76 +108,61 @@ class UsersViewSet(viewsets.ModelViewSet):
             serializer = UserSerializer(request.user)
             return Response(serializer.data)
 
-        elif request.method == 'PATCH':
-            serializer = UserSerializer(
-                request.user,
-                data=request.data,
-                partial=True
-            )
-            if serializer.is_valid():
-                # Запрещаем обычным пользователям менять роль
-                if ('role' in serializer.validated_data
-                        and request.user.role != 'admin'):
-                    serializer.validated_data.pop('role')
-                serializer.save()
-                return Response(serializer.data)
-            return Response(
-                serializer.errors,
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        serializer = UserSerializer(
+            request.user,
+            data=request.data,
+            partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+
+        if 'role' in serializer.validated_data:
+            serializer.validated_data['role'] = request.user.role
+
+        serializer.save()
+        return Response(serializer.data)
 
 
-class CategoryViewSet(
+class BaseCategoryGenreViewSet(
     mixins.CreateModelMixin,
     mixins.DestroyModelMixin,
     mixins.ListModelMixin,
     viewsets.GenericViewSet
 ):
+    """Базовый ViewSet для категорий и жанров."""
+
+    permission_classes = (IsAdminOrReadOnly,)
+    filter_backends = (SearchFilter,)
+    search_fields = ('name',)
+    lookup_field = 'slug'
+
+
+class CategoryViewSet(BaseCategoryGenreViewSet):
     """ViewSet для управления категориями."""
 
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
-    permission_classes = (IsAdminOrReadOnly,)
-    filter_backends = (SearchFilter,)
-    search_fields = ('name',)
-    lookup_field = 'slug'
 
 
-class GenreViewSet(
-    mixins.CreateModelMixin,
-    mixins.DestroyModelMixin,
-    mixins.ListModelMixin,
-    viewsets.GenericViewSet
-):
-    """ViewSet для управления жанрами."""
+class GenreViewSet(BaseCategoryGenreViewSet):
+    """ViewSet для управления жанров."""
 
     queryset = Genre.objects.all()
     serializer_class = GenreSerializer
-    permission_classes = (IsAdminOrReadOnly,)
-    filter_backends = (SearchFilter,)
-    search_fields = ('name',)
-    lookup_field = 'slug'
 
 
 class TitleViewSet(viewsets.ModelViewSet):
     """ViewSet для управления произведениями."""
 
-    queryset = Title.objects.all().prefetch_related('genre', 'reviews')
+    queryset = Title.objects.all().annotate(
+        rating=Avg('reviews__score')
+    )
     permission_classes = (IsAdminOrReadOnly,)
     filter_backends = (DjangoFilterBackend,)
     filterset_class = TitleFilter
+    http_method_names = ['get', 'post', 'patch', 'delete']
 
     def get_serializer_class(self):
         """Выбор сериализатора в зависимости от действия."""
         if self.action in ('list', 'retrieve'):
             return TitleReadSerializer
         return TitleWriteSerializer
-
-    def update(self, request, *args, **kwargs):
-        """Запрещает PUT-запросы, разрешает только PATCH."""
-        if request.method == 'PUT':
-            return Response(
-                {'detail': 'Method "PUT" not allowed.'},
-                status=status.HTTP_405_METHOD_NOT_ALLOWED
-            )
-        return super().update(request, *args, **kwargs)

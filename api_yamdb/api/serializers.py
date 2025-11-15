@@ -1,33 +1,15 @@
 import re
-import uuid
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.mail import send_mail
 from rest_framework import serializers
 
-from reviews.models import Category, Genre, GenreTitle, Title
+from reviews.models import Category, Genre, Title
 
 User = get_user_model()
-USER_PATTERN = r'^[\w.@+-]+\Z'
 
 
-def send_confirmation_email(user):
-    """Отправляет email с кодом подтверждения."""
-
-    confirmation_code = str(uuid.uuid4())
-    user.confirmation_code = confirmation_code
-    user.save()
-
-    subject = 'Код подтверждения'
-    message = f'Ваш код подтверждения: {confirmation_code}'
-    recipient_list = [user.email]
-
-    send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, recipient_list)
-
-
-class UserCreateSerializer(serializers.ModelSerializer):
-    """Сериализатор для создания пользователя."""
+class SignUpResponseSerializer(serializers.ModelSerializer):
+    """Сериализатор для ответа при регистрации."""
 
     class Meta:
         model = User
@@ -46,9 +28,12 @@ class SignUpSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 'Имя пользователя "me" не разрешено.'
             )
-        if not re.match(USER_PATTERN, value):
+
+        # Проверка на допустимые символы
+        invalid_chars = re.sub(r'[\w.@+-]', '', value)
+        if invalid_chars:
             raise serializers.ValidationError(
-                'Недопустимые символы в имени пользователя.'
+                f'Недопустимые символы в имени пользователя: {invalid_chars}'
             )
         return value
 
@@ -57,14 +42,12 @@ class SignUpSerializer(serializers.Serializer):
         username = data.get('username')
         email = data.get('email')
 
-        # Проверяем уникальность username
         if (User.objects.filter(username=username)
                 .exclude(email=email).exists()):
             raise serializers.ValidationError(
                 'Пользователь с таким именем уже существует.'
             )
 
-        # Проверяем уникальность email
         if (User.objects.filter(email=email)
                 .exclude(username=username).exists()):
             raise serializers.ValidationError(
@@ -83,11 +66,11 @@ class SignUpSerializer(serializers.Serializer):
             defaults={'email': email}
         )
 
-        # Если пользователь уже существует, обновляем email
         if not created:
             user.email = email
             user.save()
 
+        from api.utils import send_confirmation_email
         send_confirmation_email(user)
         return user
 
@@ -97,6 +80,26 @@ class TokenSerializer(serializers.Serializer):
 
     username = serializers.CharField()
     confirmation_code = serializers.CharField()
+
+    def validate(self, data):
+        """Валидация кода подтверждения."""
+        username = data.get('username')
+        confirmation_code = data.get('confirmation_code')
+
+        try:
+            user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            raise serializers.ValidationError(
+                {'username': 'Пользователь не найден'},
+                code='user_not_found'
+            )
+
+        if user.confirmation_code != confirmation_code:
+            raise serializers.ValidationError(
+                {'confirmation_code': 'Неверный код подтверждения'}
+            )
+
+        return data
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -108,39 +111,6 @@ class UserSerializer(serializers.ModelSerializer):
             'username', 'email', 'first_name',
             'last_name', 'bio', 'role'
         )
-
-    def _validate_field_length(self, value, field_name, max_length):
-        """Универсальный метод валидации длины поля."""
-        if len(value) > max_length:
-            raise serializers.ValidationError(
-                f'Длина поля {field_name} не должна превышать '
-                f'{max_length} символов.'
-            )
-        return value
-
-    def validate_username(self, value):
-        """Валидация имени пользователя."""
-        if value.lower() == 'me':
-            raise serializers.ValidationError(
-                'Имя пользователя "me" не разрешено.'
-            )
-        if not re.match(USER_PATTERN, value):
-            raise serializers.ValidationError(
-                'Недопустимые символы в имени пользователя.'
-            )
-        return self._validate_field_length(value, 'username', 150)
-
-    def validate_email(self, value):
-        """Валидация email."""
-        return self._validate_field_length(value, 'email', 254)
-
-    def validate_first_name(self, value):
-        """Валидация имени."""
-        return self._validate_field_length(value, 'first_name', 150)
-
-    def validate_last_name(self, value):
-        """Валидация фамилии."""
-        return self._validate_field_length(value, 'last_name', 150)
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -164,7 +134,7 @@ class TitleReadSerializer(serializers.ModelSerializer):
 
     category = CategorySerializer(read_only=True)
     genre = GenreSerializer(many=True, read_only=True)
-    rating = serializers.IntegerField(read_only=True)
+    rating = serializers.IntegerField(read_only=True, default=None)
 
     class Meta:
         model = Title
@@ -184,7 +154,9 @@ class TitleWriteSerializer(serializers.ModelSerializer):
     genre = serializers.SlugRelatedField(
         slug_field='slug',
         queryset=Genre.objects.all(),
-        many=True
+        many=True,
+        allow_null=False,
+        allow_empty=False
     )
 
     class Meta:
@@ -194,38 +166,3 @@ class TitleWriteSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         """Возвращает данные в формате TitleReadSerializer."""
         return TitleReadSerializer(instance, context=self.context).data
-
-    def _update_genres(self, title, genres_data):
-        """Обновляет жанры произведения."""
-        # Удаляем старые связи
-        GenreTitle.objects.filter(title=title).delete()
-
-        # Создаём новые связи
-        genre_objects = [
-            GenreTitle(title=title, genre=genre)
-            for genre in genres_data
-        ]
-        GenreTitle.objects.bulk_create(genre_objects)
-
-    def create(self, validated_data):
-        """Создание произведения с жанрами."""
-        genres_data = validated_data.pop('genre')
-        title = Title.objects.create(**validated_data)
-
-        self._update_genres(title, genres_data)
-        return title
-
-    def update(self, instance, validated_data):
-        """Обновление произведения с жанрами."""
-        genres_data = validated_data.pop('genre', None)
-
-        # Обновляем основные поля
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-
-        # Обновляем жанры если переданы
-        if genres_data is not None:
-            self._update_genres(instance, genres_data)
-
-        return instance
