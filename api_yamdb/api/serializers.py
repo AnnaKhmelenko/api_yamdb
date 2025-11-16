@@ -3,9 +3,28 @@ import re
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from reviews.models import Category, Genre, Title
+from reviews.models import Category, Comment, Genre, Review, Title
+from api.utils import send_confirmation_email
+from reviews.constants import MAX_LENGTH_EMAIL, MAX_LENGTH_USERNAME
+
 
 User = get_user_model()
+
+
+def validate_username(value):
+    """Валидация имени пользователя."""
+    if value.lower() == 'me':
+        raise serializers.ValidationError(
+            'Имя пользователя "me" не разрешено.'
+        )
+
+    # Проверка на допустимые символы
+    invalid_chars = re.sub(r'[\w.@+-]', '', value)
+    if invalid_chars:
+        raise serializers.ValidationError(
+            f'Недопустимые символы в имени пользователя: {invalid_chars}'
+        )
+    return value
 
 
 class SignUpResponseSerializer(serializers.ModelSerializer):
@@ -19,23 +38,11 @@ class SignUpResponseSerializer(serializers.ModelSerializer):
 class SignUpSerializer(serializers.Serializer):
     """Сериализатор для регистрации пользователя."""
 
-    email = serializers.EmailField(max_length=254)
-    username = serializers.CharField(max_length=150)
-
-    def validate_username(self, value):
-        """Валидация имени пользователя."""
-        if value.lower() == 'me':
-            raise serializers.ValidationError(
-                'Имя пользователя "me" не разрешено.'
-            )
-
-        # Проверка на допустимые символы
-        invalid_chars = re.sub(r'[\w.@+-]', '', value)
-        if invalid_chars:
-            raise serializers.ValidationError(
-                f'Недопустимые символы в имени пользователя: {invalid_chars}'
-            )
-        return value
+    email = serializers.EmailField(max_length=MAX_LENGTH_EMAIL)
+    username = serializers.CharField(
+        max_length=MAX_LENGTH_USERNAME,
+        validators=[validate_username]
+    )
 
     def validate(self, data):
         """Валидация уникальности username и email."""
@@ -63,14 +70,9 @@ class SignUpSerializer(serializers.Serializer):
 
         user, created = User.objects.get_or_create(
             username=username,
-            defaults={'email': email}
+            email=email
         )
 
-        if not created:
-            user.email = email
-            user.save()
-
-        from api.utils import send_confirmation_email
         send_confirmation_email(user)
         return user
 
@@ -83,16 +85,10 @@ class TokenSerializer(serializers.Serializer):
 
     def validate(self, data):
         """Валидация кода подтверждения."""
-        username = data.get('username')
         confirmation_code = data.get('confirmation_code')
+        username = data.get('username')
 
-        try:
-            user = User.objects.get(username=username)
-        except User.DoesNotExist:
-            raise serializers.ValidationError(
-                {'username': 'Пользователь не найден'},
-                code='user_not_found'
-            )
+        user = User.objects.get(username=username)
 
         if user.confirmation_code != confirmation_code:
             raise serializers.ValidationError(
@@ -166,3 +162,46 @@ class TitleWriteSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         """Возвращает данные в формате TitleReadSerializer."""
         return TitleReadSerializer(instance, context=self.context).data
+
+
+class ReviewSerializer(serializers.ModelSerializer):
+    """Сериализатор для модели отзыва."""
+
+    author = serializers.SlugRelatedField(
+        slug_field='username',
+        read_only=True
+    )
+
+    class Meta:
+        model = Review
+        fields = ('id', 'text', 'author', 'score', 'pub_date')
+
+    def validate(self, data):
+        """Проверяет, что пользователь не оставлял более одного отзыва."""
+        request = self.context.get('request')
+
+        # Проверяем только для POST-запросов
+        if request and request.method == 'POST':
+            title_id = self.context['view'].kwargs.get('title_id')
+            user = request.user
+
+            # Проверяем существование отзыва
+            if Review.objects.filter(title_id=title_id, author=user).exists():
+                raise serializers.ValidationError({
+                    'detail': 'Вы уже оставляли отзыв на это произведение'
+                })
+
+        return data
+
+
+class CommentSerializer(serializers.ModelSerializer):
+    """Сериализатор для модели комментария."""
+
+    author = serializers.SlugRelatedField(
+        slug_field='username',
+        read_only=True
+    )
+
+    class Meta:
+        model = Comment
+        fields = ('id', 'text', 'author', 'pub_date')

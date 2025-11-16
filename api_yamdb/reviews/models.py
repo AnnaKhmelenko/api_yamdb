@@ -1,41 +1,16 @@
-import re
 import uuid
-from datetime import datetime
 
 from django.contrib.auth.models import AbstractUser
-from django.core.exceptions import ValidationError
-from django.core.validators import (MaxValueValidator, MinValueValidator,
-                                    RegexValidator)
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from .constants import (
-    ADMIN, MAX_LENGTH_CATEGORY_NAME,
-    MAX_LENGTH_CATEGORY_SLUG, MAX_LENGTH_COMMENT_TEXT,
-    MAX_LENGTH_CONFIRMATION_CODE, MAX_LENGTH_EMAIL,
-    MAX_LENGTH_REVIEW_TEXT, MAX_LENGTH_TITLE_NAME,
-    MAX_LENGTH_USERNAME, MAX_SCORE, MIN_SCORE, MODERATOR,
-    ROLE_CHOICES, USER)
-
-
-def validate_username(value):
-    """Валидация имени пользователя."""
-    if value.lower() == 'me':
-        raise ValidationError('Имя пользователя "me" не разрешено.')
-
-    invalid_chars = re.sub(r'[\w.@+-]', '', value)
-    if invalid_chars:
-        raise ValidationError(
-            f'Недопустимые символы в имени пользователя: {invalid_chars}'
-        )
-    return value
-
-
-def validate_year(value):
-    """Валидация года выпуска."""
-    current_year = datetime.now().year
-    if value > current_year:
-        raise ValidationError('Год выпуска не может быть в будущем.')
-    return value
+    ADMIN, MAX_LENGTH_CATEGORY_NAME, MAX_LENGTH_CATEGORY_SLUG,
+    MAX_LENGTH_COMMENT_TEXT, MAX_LENGTH_CONFIRMATION_CODE, MAX_LENGTH_EMAIL,
+    MAX_LENGTH_REVIEW_TEXT, MAX_LENGTH_TITLE_NAME, MAX_LENGTH_USERNAME,
+    MAX_SCORE, MIN_SCORE, MODERATOR, ROLE_CHOICES, USER
+)
+from .validators import validate_username, validate_year
 
 
 class BaseSlugModel(models.Model):
@@ -69,13 +44,7 @@ class User(AbstractUser):
         max_length=MAX_LENGTH_USERNAME,
         unique=True,
         verbose_name='Имя пользователя',
-        validators=[
-            RegexValidator(
-                regex=r'^[\w.@+-]+\Z',
-                message='Недопустимые символы в имени пользователя.'
-            ),
-            validate_username
-        ]
+        validators=[validate_username]
     )
     bio = models.TextField(
         blank=True,
