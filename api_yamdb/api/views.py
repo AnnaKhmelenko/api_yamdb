@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.db.models import Avg
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import mixins, permissions, status, viewsets
+from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
 from rest_framework.pagination import PageNumberPagination
@@ -29,6 +29,7 @@ from .serializers import (
     TokenSerializer,
     UserSerializer,
 )
+from .base_views import BaseCategoryGenreViewSet
 
 User = get_user_model()
 
@@ -57,20 +58,29 @@ class GetTokenView(APIView):
 
     def post(self, request):
         """Обработка POST-запроса для получения токена."""
-        username = request.data.get('username')
-        if username:
-            try:
-                user = User.objects.get(username=username)
-            except User.DoesNotExist:
-                return Response(
-                    {'error': 'Пользователь не найден'},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-
         serializer = TokenSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
 
-        user = User.objects.get(username=username)
+        if not serializer.is_valid():
+            return Response(serializer.errors,
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        username = request.data.get('username')
+        confirmation_code = request.data.get('confirmation_code')
+
+        try:
+            user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'Пользователь не найден'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if user.confirmation_code != confirmation_code:
+            return Response(
+                {'confirmation_code': 'Неверный код подтверждения'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         token = str(AccessToken.for_user(user))
         return Response({'token': token})
 
@@ -109,20 +119,6 @@ class UsersViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-class BaseCategoryGenreViewSet(
-    mixins.CreateModelMixin,
-    mixins.DestroyModelMixin,
-    mixins.ListModelMixin,
-    viewsets.GenericViewSet
-):
-    """Базовый ViewSet для категорий и жанров."""
-
-    permission_classes = (IsAdminOrReadOnly,)
-    filter_backends = (SearchFilter,)
-    search_fields = ('name',)
-    lookup_field = 'slug'
-
-
 class CategoryViewSet(BaseCategoryGenreViewSet):
     """ViewSet для управления категориями."""
 
@@ -131,7 +127,7 @@ class CategoryViewSet(BaseCategoryGenreViewSet):
 
 
 class GenreViewSet(BaseCategoryGenreViewSet):
-    """ViewSet для управления жанрами."""
+    """ViewSet для управления жанров."""
 
     queryset = Genre.objects.all()
     serializer_class = GenreSerializer

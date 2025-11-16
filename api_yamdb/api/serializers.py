@@ -1,30 +1,13 @@
-import re
-
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
 from reviews.models import Category, Comment, Genre, Review, Title
+from reviews.validators import validate_username
 from api.utils import send_confirmation_email
 from reviews.constants import MAX_LENGTH_EMAIL, MAX_LENGTH_USERNAME
 
 
 User = get_user_model()
-
-
-def validate_username(value):
-    """Валидация имени пользователя."""
-    if value.lower() == 'me':
-        raise serializers.ValidationError(
-            'Имя пользователя "me" не разрешено.'
-        )
-
-    # Проверка на допустимые символы
-    invalid_chars = re.sub(r'[\w.@+-]', '', value)
-    if invalid_chars:
-        raise serializers.ValidationError(
-            f'Недопустимые символы в имени пользователя: {invalid_chars}'
-        )
-    return value
 
 
 class SignUpResponseSerializer(serializers.ModelSerializer):
@@ -82,20 +65,6 @@ class TokenSerializer(serializers.Serializer):
 
     username = serializers.CharField()
     confirmation_code = serializers.CharField()
-
-    def validate(self, data):
-        """Валидация кода подтверждения."""
-        confirmation_code = data.get('confirmation_code')
-        username = data.get('username')
-
-        user = User.objects.get(username=username)
-
-        if user.confirmation_code != confirmation_code:
-            raise serializers.ValidationError(
-                {'confirmation_code': 'Неверный код подтверждения'}
-            )
-
-        return data
 
 
 class UserSerializer(serializers.ModelSerializer):
